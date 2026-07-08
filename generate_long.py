@@ -167,14 +167,11 @@ def make_bg(duration):
 def make_outlined(text, duration, font, fontsize, color, stroke_w=6, ypos="center", size=None):
     if size is None:
         size = (W - 260, None)
-    common = dict(font=font, fontsize=fontsize, method="caption",
-                  size=size, align="center", interline=14)
-    stroke = TextClip(text, color=STROKE_COLOR, stroke_color=STROKE_COLOR,
-                      stroke_width=stroke_w, **common).set_duration(duration)
-    fill = TextClip(text, color=color, **common).set_duration(duration)
-    grp = CompositeVideoClip([stroke.set_position("center"), fill.set_position("center")],
-                             size=stroke.size).set_duration(duration)
-    return grp.set_position(("center", ypos))
+    # 塗りと縁取りを1回で描く（2枚重ねだと折り返しズレで影がずれるため単一クリップに）
+    clip = TextClip(text, color=color, stroke_color=STROKE_COLOR, stroke_width=stroke_w,
+                    font=font, fontsize=fontsize, method="caption",
+                    size=size, align="center", interline=14).set_duration(duration)
+    return clip.set_position(("center", ypos))
 
 
 def make_scene(tgt_text, ja_text, audio_file, header_label):
