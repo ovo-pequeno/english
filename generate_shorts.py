@@ -160,15 +160,35 @@ def make_bg(duration):
     return ColorClip(size=(W, H), color=BG_COLOR, duration=duration)
 
 
+def _prewrap(text, fontsize, canvas_w):
+    """先に改行位置を決めておく（縁取り版と本体版で折り返しを完全一致させるため）。
+    英語（スペースあり）は単語単位、日本語（スペースなし）は文字数で折り返す。"""
+    import textwrap
+    is_latin = sum(ord(c) < 128 for c in text) > len(text) * 0.6
+    factor = 0.58 if is_latin else 1.05        # 1文字の推定幅 ≒ fontsize*factor
+    max_chars = max(6, int(canvas_w / (fontsize * factor)))
+    if is_latin:
+        return "\n".join(textwrap.wrap(text, width=max_chars)) or text
+    # 日本語などは文字数で機械的に折り返し
+    return "\n".join(text[i:i + max_chars] for i in range(0, len(text), max_chars)) or text
+
+
 def make_outlined(text, duration, font, fontsize, color, stroke_w=6, ypos="center", size=None):
     if size is None:
         size = (W - 120, None)
-    # 塗りと縁取りを1回のレンダリングで同時に描く（2枚重ねだと折り返しが
-    # 食い違って影がズレることがあるため、単一クリップにして完全一致させる）
-    clip = TextClip(text, color=color, stroke_color=STROKE_COLOR, stroke_width=stroke_w,
-                    font=font, fontsize=fontsize, method="caption",
-                    size=size, align="center", interline=14).set_duration(duration)
-    return clip.set_position(("center", ypos))
+    canvas_w = size[0]
+    # 手動で改行を確定 → 縁取り版・本体版に同じ改行済みテキストを渡す（ズレ防止）
+    wrapped = _prewrap(text, fontsize, canvas_w)
+    common = dict(font=font, fontsize=fontsize, method="label",
+                  align="center", interline=14)
+    stroke = TextClip(wrapped, color=STROKE_COLOR, stroke_color=STROKE_COLOR,
+                      stroke_width=stroke_w, **common).set_duration(duration)
+    fill = TextClip(wrapped, color=color, **common).set_duration(duration)
+    grp = CompositeVideoClip(
+        [stroke.set_position(("center", "center")), fill.set_position(("center", "center"))],
+        size=(max(stroke.w, fill.w), max(stroke.h, fill.h))
+    ).set_duration(duration)
+    return grp.set_position(("center", ypos))
 
 
 def make_scene(tgt_text, ja_text, audio_file):

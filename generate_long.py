@@ -37,7 +37,7 @@ VOICE_SPEED  = 1.0
 LEVEL        = os.environ.get("LEVEL", "初級〜中級")
 # 電話番号認証なしでも上げられるよう15分以内に収める。
 # 4話×(タイトル+10〜14文)＋前後カードで概ね12〜14分想定。
-NUM_STORIES  = int(os.environ.get("NUM_STORIES", "4"))
+NUM_STORIES  = int(os.environ.get("NUM_STORIES", "8"))
 MAX_SECONDS  = 14 * 60      # これを超えたら以降の話を打ち切って15分未満を厳守
 OUT_DIR  = "out_l"
 TMP_DIR  = "tmp_l"
@@ -132,18 +132,40 @@ sentences: 10-14 items.{avoid_text}
                 raise
 
 
-def make_audio_tgt(text, filename):
+def make_audio_tgt(text, filename, slow=False):
     if not text.strip():
         AudioSegment.silent(duration=400).export(filename, format="mp3")
         return filename
     tmp = "tmp_" + filename
-    gTTS(text=text, lang=GTTS_LANG, slow=False).save(tmp)
+    gTTS(text=text, lang=GTTS_LANG, slow=slow).save(tmp)
     seg = AudioSegment.from_mp3(tmp)
-    if VOICE_SPEED and VOICE_SPEED != 1.0:
+    if (not slow) and VOICE_SPEED and VOICE_SPEED != 1.0:
         seg = seg.speedup(playback_speed=VOICE_SPEED)
     seg = seg + AudioSegment.silent(duration=400)
     seg.export(filename, format="mp3")
     os.remove(tmp)
+    return filename
+
+
+def make_audio_repeat(text, filename):
+    """1回目ふつう → 間 → 2回目ゆっくり を1つの音声にまとめる（英語学習向け）"""
+    if not text.strip():
+        AudioSegment.silent(duration=400).export(filename, format="mp3")
+        return filename
+    n_tmp = "n_" + filename
+    s_tmp = "s_" + filename
+    # 1回目：通常速度
+    gTTS(text=text, lang=GTTS_LANG, slow=False).save(n_tmp)
+    normal = AudioSegment.from_mp3(n_tmp)
+    if VOICE_SPEED and VOICE_SPEED != 1.0:
+        normal = normal.speedup(playback_speed=VOICE_SPEED)
+    # 2回目：ゆっくり
+    gTTS(text=text, lang=GTTS_LANG, slow=True).save(s_tmp)
+    slow = AudioSegment.from_mp3(s_tmp)
+    # 通常 → 0.6秒の間 → ゆっくり → 0.5秒の余韻
+    combined = normal + AudioSegment.silent(duration=600) + slow + AudioSegment.silent(duration=500)
+    combined.export(filename, format="mp3")
+    os.remove(n_tmp); os.remove(s_tmp)
     return filename
 
 
@@ -164,14 +186,32 @@ def make_bg(duration):
     return ColorClip(size=(W, H), color=BG_COLOR, duration=duration)
 
 
+def _prewrap(text, fontsize, canvas_w):
+    """先に改行位置を決めておく（縁取り版と本体版で折り返しを完全一致させるため）。"""
+    import textwrap
+    is_latin = sum(ord(c) < 128 for c in text) > len(text) * 0.6
+    factor = 0.58 if is_latin else 1.05
+    max_chars = max(6, int(canvas_w / (fontsize * factor)))
+    if is_latin:
+        return "\n".join(textwrap.wrap(text, width=max_chars)) or text
+    return "\n".join(text[i:i + max_chars] for i in range(0, len(text), max_chars)) or text
+
+
 def make_outlined(text, duration, font, fontsize, color, stroke_w=6, ypos="center", size=None):
     if size is None:
         size = (W - 260, None)
-    # 塗りと縁取りを1回で描く（2枚重ねだと折り返しズレで影がずれるため単一クリップに）
-    clip = TextClip(text, color=color, stroke_color=STROKE_COLOR, stroke_width=stroke_w,
-                    font=font, fontsize=fontsize, method="caption",
-                    size=size, align="center", interline=14).set_duration(duration)
-    return clip.set_position(("center", ypos))
+    canvas_w = size[0]
+    wrapped = _prewrap(text, fontsize, canvas_w)
+    common = dict(font=font, fontsize=fontsize, method="label",
+                  align="center", interline=14)
+    stroke = TextClip(wrapped, color=STROKE_COLOR, stroke_color=STROKE_COLOR,
+                      stroke_width=stroke_w, **common).set_duration(duration)
+    fill = TextClip(wrapped, color=color, **common).set_duration(duration)
+    grp = CompositeVideoClip(
+        [stroke.set_position(("center", "center")), fill.set_position(("center", "center"))],
+        size=(max(stroke.w, fill.w), max(stroke.h, fill.h))
+    ).set_duration(duration)
+    return grp.set_position(("center", ypos))
 
 
 def make_scene(tgt_text, ja_text, audio_file, header_label):
@@ -232,31 +272,43 @@ def build_video(stories):
     used_stories = 0
     for si, story in enumerate(stories):
         label = f"Story {si+1}  {story.get('title_tgt','')}"
-        a = make_audio_tgt(story.get("title_tgt", f"Story {si+1}"), f"a_{idx}.mp3")
+        # まず1話ぶんのクリップを一時的に作って、話まるごとの尺を測る。
+        # 「話まるごと入れても上限内」のときだけ採用する＝常に話が完結して終わる。
+        story_clips = []
+        story_dur = 0.0
+        local_idx = idx
+
+        # タイトルカード
+        a = make_audio_tgt(story.get("title_tgt", f"Story {si+1}"), f"a_{local_idx}.mp3")
         card_d = _dur(a) + 0.8
-        # 15分制限：このカードを足すと超えるなら打ち切り
-        if total + card_d > MAX_SECONDS and used_stories > 0:
-            os.remove(a); break
-        p = f"{TMP_DIR}/clip_{idx:04d}.mp4"
+        p = f"{TMP_DIR}/clip_{local_idx:04d}.mp4"
         render(make_card(story.get("title_tgt", f"Story {si+1}"), a), p)
-        clip_paths.append(p); os.remove(a); idx += 1; total += card_d
-        stopped = False
+        os.remove(a); story_clips.append(p); story_dur += card_d; local_idx += 1
+
+        # 各文（1回目ふつう→2回目ゆっくり）
         for s in story["sentences"]:
             tgt = (s.get("tgt") or "").strip()
             ja = (s.get("ja") or "").strip()
             if not tgt:
                 continue
-            a = make_audio_tgt(tgt, f"a_{idx}.mp3")
-            sc_d = _dur(a) + 0.6
-            if total + sc_d > MAX_SECONDS:
-                os.remove(a); stopped = True; break
             print(f"  [Story{si+1}] {tgt[:34]}...")
-            p = f"{TMP_DIR}/clip_{idx:04d}.mp4"
+            a = make_audio_repeat(tgt, f"a_{local_idx}.mp3")
+            sc_d = _dur(a) + 0.6
+            p = f"{TMP_DIR}/clip_{local_idx:04d}.mp4"
             render(make_scene(tgt, ja, a, label), p)
-            clip_paths.append(p); os.remove(a); idx += 1; total += sc_d
-        used_stories += 1
-        if stopped:
+            os.remove(a); story_clips.append(p); story_dur += sc_d; local_idx += 1
+
+        # 採用判定：この話を丸ごと入れて上限を超えるなら不採用で打ち切り。
+        # ただし1話も入っていなければ最初の話は必ず入れる（空動画防止）。
+        if used_stories > 0 and total + story_dur > MAX_SECONDS:
+            for cp in story_clips:
+                if os.path.exists(cp):
+                    os.remove(cp)
             break
+        clip_paths.extend(story_clips)
+        total += story_dur
+        idx = local_idx
+        used_stories += 1
 
     # エンディング
     end_txt = "Thank you for listening!"
