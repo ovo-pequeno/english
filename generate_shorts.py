@@ -56,7 +56,7 @@ if not os.path.exists(FONT_TGT):
 BG_COLOR      = (18, 24, 40)
 BG_IMAGE      = "assets/bg_short.png" if os.path.exists("assets/bg_short.png") else None
 TGT_COLOR     = "white"
-JA_COLOR      = "#9FD0FF"
+JA_COLOR      = "#7FC0FF"
 STROKE_COLOR  = "#000000"
 TGT_FONTSIZE  = 70
 JA_FONTSIZE   = 48
@@ -201,7 +201,7 @@ def make_scene(tgt_text, ja_text, audio_file):
                                  stroke_w=7, ypos=int(H * 0.38)))
     if ja_text:
         layers.append(make_outlined(ja_text, duration, FONT, JA_FONTSIZE, JA_COLOR,
-                                     stroke_w=5, ypos=int(H * 0.62)))
+                                     stroke_w=9, ypos=int(H * 0.62)))
     scene = CompositeVideoClip(layers, size=(W, H)).set_duration(duration)
     if duration > narration.duration + 0.02:
         narration = CompositeAudioClip([narration]).set_duration(duration)

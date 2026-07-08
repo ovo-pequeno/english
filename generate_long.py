@@ -37,7 +37,7 @@ VOICE_SPEED  = 1.0
 LEVEL        = os.environ.get("LEVEL", "初級〜中級")
 # 電話番号認証なしでも上げられるよう15分以内に収める。
 # 4話×(タイトル+10〜14文)＋前後カードで概ね12〜14分想定。
-NUM_STORIES  = int(os.environ.get("NUM_STORIES", "8"))
+NUM_STORIES  = int(os.environ.get("NUM_STORIES", "12"))
 MAX_SECONDS  = 14 * 60      # これを超えたら以降の話を打ち切って15分未満を厳守
 OUT_DIR  = "out_l"
 TMP_DIR  = "tmp_l"

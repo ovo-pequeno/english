@@ -36,7 +36,7 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           PRIVACY: "public"
           LEVEL: "初級〜中級"
-          NUM_STORIES: "4"
+          NUM_STORIES: "12"
         run: python generate_long.py
       - name: Commit dedup log
         run: |
